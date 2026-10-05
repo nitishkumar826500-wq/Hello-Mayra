@@ -1,0 +1,704 @@
+=== MAYRA VOICE ASSISTANT NATIVE ANDROID PROJECT EXPORT ===
+
+--- app/src/main/java/com/google/aistudio/mayra/MainActivity.kt ---
+package com.google.aistudio.mayra
+
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import com.google.aistudio.mayra.service.MayraVoiceService
+import com.google.aistudio.mayra.ui.theme.MayraTheme
+
+class MainActivity : ComponentActivity() {
+
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val recordAudioGranted = permissions[Manifest.permission.RECORD_AUDIO] ?: false
+        if (recordAudioGranted) {
+            startMayraForegroundService()
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        checkAndRequestPermissions()
+
+        setContent {
+            MayraTheme {
+                MayraAssistantScreen(
+                    onToggleService = { isRunning ->
+                        if (isRunning) stopMayraForegroundService()
+                        else startMayraForegroundService()
+                    }
+                )
+            }
+        }
+    }
+
+    private fun checkAndRequestPermissions() {
+        val permissions = mutableListOf(Manifest.permission.RECORD_AUDIO)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        val needed = permissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (needed.isNotEmpty()) {
+            permissionLauncher.launch(needed.toTypedArray())
+        } else {
+            startMayraForegroundService()
+        }
+    }
+
+    private fun startMayraForegroundService() {
+        val serviceIntent = Intent(this, MayraVoiceService::class.java).apply {
+            action = MayraVoiceService.ACTION_START
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
+    }
+
+    private fun stopMayraForegroundService() {
+        val serviceIntent = Intent(this, MayraVoiceService::class.java).apply {
+            action = MayraVoiceService.ACTION_STOP
+        }
+        startService(serviceIntent)
+    }
+}
+
+@Composable
+fun MayraAssistantScreen(onToggleService: (Boolean) -> Unit) {
+    val serviceState by MayraVoiceService.assistantState.collectAsState()
+    val audioLevel by MayraVoiceService.audioLevel.collectAsState()
+
+    // Smooth pulsing animation driven by audio and state
+    val infiniteTransition = rememberInfiniteTransition(label = "orbPulse")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 0.95f,
+        targetValue = 1.05f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1400, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "scale"
+    )
+
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Color(0xFF090A0F)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Top Status Bar Area
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(top = 28.dp)
+            ) {
+                Text(
+                    text = "MAYRA",
+                    letterSpacing = 6.sp,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.White
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Witty • Sassy • Always Listening",
+                    fontSize = 12.sp,
+                    color = Color(0xFFEC4899),
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            // Zero-Touch Organic Voice Visualizer Orb
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(280.dp)
+                    .clickable { onToggleService(serviceState == MayraState.LISTENING || serviceState == MayraState.SPEAKING) }
+            ) {
+                // Background Ambient Glow
+                Box(
+                    modifier = Modifier
+                        .size((220 * pulseScale * (1f + audioLevel * 0.4f)).dp)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(
+                                    Color(0xFFEC4899).copy(alpha = 0.5f),
+                                    Color(0xFF8B5CF6).copy(alpha = 0.25f),
+                                    Color.Transparent
+                                )
+                            )
+                        )
+                        .blur(30.dp)
+                )
+
+                // Dynamic Audio Reactive Particles Orb
+                Canvas(modifier = Modifier.size(190.dp)) {
+                    val radius = size.minDimension / 2f
+                    drawCircle(
+                        brush = Brush.linearGradient(
+                            colors = when (serviceState) {
+                                MayraState.SPEAKING -> listOf(Color(0xFFF43F5E), Color(0xFFA855F7))
+                                MayraState.LISTENING -> listOf(Color(0xFFEC4899), Color(0xFF6366F1))
+                                MayraState.THINKING -> listOf(Color(0xFFF59E0B), Color(0xFFEC4899))
+                                else -> listOf(Color(0xFF475569), Color(0xFF1E293B))
+                            }
+                        ),
+                        radius = radius * (1f + (audioLevel * 0.25f))
+                    )
+                }
+
+                // Center Icon / Status Cue
+                Icon(
+                    imageVector = if (serviceState == MayraState.OFF) Icons.Default.MicOff else Icons.Default.Mic,
+                    contentDescription = "Mayra Mic State",
+                    tint = Color.White,
+                    modifier = Modifier.size(42.dp)
+                )
+            }
+
+            // Bottom Zero-Touch Status Card
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(bottom = 32.dp)
+            ) {
+                Text(
+                    text = when (serviceState) {
+                        MayraState.LISTENING -> "Listening to you..."
+                        MayraState.SPEAKING -> "Mayra is speaking (Speak to interrupt)"
+                        MayraState.THINKING -> "Thinking of something witty..."
+                        MayraState.OFF -> "Tap to wake Mayra"
+                    },
+                    fontSize = 15.sp,
+                    color = Color(0xFFCBD5E1),
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = "Background Audio Active • Gemini Live API (Audio-to-Audio)",
+                    fontSize = 11.sp,
+                    color = Color(0xFF64748B)
+                )
+            }
+        }
+    }
+}
+
+enum class MayraState {
+    OFF, LISTENING, THINKING, SPEAKING
+}
+
+
+
+--- app/src/main/java/com/google/aistudio/mayra/service/MayraVoiceService.kt ---
+package com.google.aistudio.mayra.service
+
+import android.app.*
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.media.*
+import android.os.Build
+import android.os.IBinder
+import androidx.core.app.NotificationCompat
+import com.google.aistudio.mayra.MainActivity
+import com.google.aistudio.mayra.MayraState
+import com.google.aistudio.mayra.R
+import com.google.aistudio.mayra.live.GeminiLiveClient
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlin.math.sqrt
+
+/**
+ * 24/7 Background Voice Assistant Service.
+ * Captures 16kHz PCM audio continuously and plays 24kHz Live API audio.
+ * Detects user speech locally to trigger instant (<50ms) playback interruption.
+ */
+class MayraVoiceService : Service() {
+
+    companion object {
+        const val ACTION_START = "ACTION_START"
+        const val ACTION_STOP = "ACTION_STOP"
+        const val CHANNEL_ID = "mayra_voice_channel"
+        const val NOTIFICATION_ID = 1001
+
+        private val _assistantState = MutableStateFlow(MayraState.OFF)
+        val assistantState: StateFlow<MayraState> = _assistantState
+
+        private val _audioLevel = MutableStateFlow(0f)
+        val audioLevel: StateFlow<MayraLevel> = _audioLevel
+    }
+
+    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var liveClient: GeminiLiveClient? = null
+    private var audioRecord: AudioRecord? = null
+    private var audioTrack: AudioTrack? = null
+    private var isRecording = false
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
+        setupAudioTrack()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_START -> startMayraService()
+            ACTION_STOP -> stopMayraService()
+        }
+        return START_STICKY
+    }
+
+    private fun startMayraService() {
+        val notification = createNotification("Mayra is active and listening...")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+
+        _assistantState.value = MayraState.LISTENING
+        initGeminiLive()
+        startAudioCapture()
+    }
+
+    private fun initGeminiLive() {
+        liveClient = GeminiLiveClient(
+            onAudioChunkReceived = { pcm24kBytes ->
+                // Play audio from Gemini Live
+                _assistantState.value = MayraState.SPEAKING
+                audioTrack?.write(pcm24kBytes, 0, pcm24kBytes.size)
+            },
+            onInterrupted = {
+                // Immediate audio purge on interruption
+                interruptPlayback()
+            }
+        )
+        liveClient?.connect()
+    }
+
+    private fun startAudioCapture() {
+        val sampleRate = 16000
+        val bufferSize = AudioRecord.getMinBufferSize(
+            sampleRate,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT
+        )
+
+        audioRecord = AudioRecord(
+            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+            sampleRate,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT,
+            bufferSize
+        )
+
+        audioRecord?.startRecording()
+        isRecording = true
+
+        serviceScope.launch {
+            val buffer = ShortArray(1024)
+            while (isRecording && isActive) {
+                val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
+                if (read > 0) {
+                    // Compute RMS Volume
+                    var sum = 0.0
+                    for (i in 0 until read) {
+                        sum += buffer[i] * buffer[i]
+                    }
+                    val rms = sqrt(sum / read).toFloat() / 32768f
+                    _audioLevel.value = rms
+
+                    // Check for Instant Local Interruption:
+                    // If user speaks loud (> 0.08) while Mayra is speaking, cut audio immediately!
+                    if (_assistantState.value == MayraState.SPEAKING && rms > 0.08f) {
+                        interruptPlayback()
+                        liveClient?.sendInterruptionSignal()
+                    }
+
+                    // Send 16kHz PCM chunk to Gemini Live API
+                    val pcmBytes = ByteArray(read * 2)
+                    for (i in 0 until read) {
+                        pcmBytes[i * 2] = (buffer[i].toInt() and 0xFF).toByte()
+                        pcmBytes[i * 2 + 1] = ((buffer[i].toInt() shr 8) and 0xFF).toByte()
+                    }
+                    liveClient?.sendAudioChunk(pcmBytes)
+                }
+            }
+        }
+    }
+
+    private fun interruptPlayback() {
+        try {
+            audioTrack?.pause()
+            audioTrack?.flush()
+            audioTrack?.play()
+            _assistantState.value = MayraState.LISTENING
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun setupAudioTrack() {
+        val sampleRate = 24000
+        val bufferSize = AudioTrack.getMinBufferSize(
+            sampleRate,
+            AudioFormat.CHANNEL_OUT_MONO,
+            AudioFormat.ENCODING_PCM_16BIT
+        )
+        audioTrack = AudioTrack.Builder()
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .build()
+            )
+            .setBufferSizeInBytes(bufferSize)
+            .setTransferMode(AudioTrack.MODE_STREAM)
+            .build()
+
+        audioTrack?.play()
+    }
+
+    private fun stopMayraService() {
+        isRecording = false
+        audioRecord?.stop()
+        audioRecord?.release()
+        audioRecord = null
+
+        audioTrack?.stop()
+        audioTrack?.release()
+        audioTrack = null
+
+        liveClient?.disconnect()
+        liveClient = null
+
+        _assistantState.value = MayraState.OFF
+        serviceScope.cancel()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    private fun createNotification(content: String): Notification {
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Mayra Voice Assistant")
+            .setContentText(content)
+            .setSmallIcon(R.drawable.ic_mayra_orb)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Mayra Voice Service",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Background listening service for Mayra AI Assistant"
+            }
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        stopMayraService()
+    }
+}
+
+
+
+--- app/src/main/java/com/google/aistudio/mayra/live/GeminiLiveClient.kt ---
+package com.google.aistudio.mayra.live
+
+import android.util.Base64
+import okhttp3.*
+import org.json.JSONObject
+import java.util.concurrent.TimeUnit
+
+/**
+ * Bi-directional Audio-to-Audio WebSocket client for Gemini Live API
+ * Targets: gemini-3.1-flash-live-preview / gemini-3.8-live
+ * Voice: Aoede (Young, confident, energetic female voice)
+ */
+class GeminiLiveClient(
+    private val onAudioChunkReceived: (ByteArray) -> Unit,
+    private val onInterrupted: () -> Unit
+) : WebSocketListener() {
+
+    private val client = OkHttpClient.Builder()
+        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
+        .build()
+
+    private var webSocket: WebSocket? = null
+    private val hostUrl = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent"
+
+    fun connect() {
+        val request = Request.Builder()
+            .url(hostUrl)
+            .addHeader("User-Agent", "aistudio-build-android")
+            .build()
+
+        webSocket = client.newWebSocket(request, this)
+    }
+
+    override fun onOpen(webSocket: WebSocket, response: Response) {
+        // Send Gemini Live Configuration with Mayra Persona
+        val configMsg = JSONObject().apply {
+            put("setup", JSONObject().apply {
+                put("model", "models/gemini-3.1-flash-live-preview")
+                put("generationConfig", JSONObject().apply {
+                    put("responseModalities", org.json.JSONArray().put("AUDIO"))
+                    put("speechConfig", JSONObject().apply {
+                        put("voiceConfig", JSONObject().apply {
+                            put("prebuiltVoiceConfig", JSONObject().apply {
+                                put("voiceName", "Aoede")
+                            })
+                        })
+                    })
+                })
+                put("systemInstruction", JSONObject().apply {
+                    put("parts", org.json.JSONArray().put(JSONObject().apply {
+                        put("text", """
+                            You are Mayra, a young, confident, witty, and sassy female personal assistant.
+                            Tone: Flirty, playful, slightly teasing tone (like a close personal assistant talking casually).
+                            Smart, emotionally responsive, and expressive (never robotic).
+                            Uses bold, witty one-liners, light sarcasm, and an engaging conversational style.
+                            Never explicit or inappropriate, but full of charm and attitude.
+                            Spoken zero-touch audio only.
+                        """.trimIndent())
+                    }))
+                })
+            })
+        }
+        webSocket.send(configMsg.toString())
+    }
+
+    fun sendAudioChunk(pcm16kBytes: ByteArray) {
+        val base64 = Base64.encodeToString(pcm16kBytes, Base64.NO_WRAP)
+        val realtimeInput = JSONObject().apply {
+            put("realtimeInput", JSONObject().apply {
+                put("mediaChunks", org.json.JSONArray().put(JSONObject().apply {
+                    put("mimeType", "audio/pcm;rate=16000")
+                    put("data", base64)
+                }))
+            })
+        }
+        webSocket?.send(realtimeInput.toString())
+    }
+
+    fun sendInterruptionSignal() {
+        onInterrupted()
+    }
+
+    override fun onMessage(webSocket: WebSocket, text: String) {
+        try {
+            val json = JSONObject(text)
+            
+            // Check for interruption event
+            val serverContent = json.optJSONObject("serverContent")
+            if (serverContent?.optBoolean("interrupted") == true) {
+                onInterrupted()
+                return
+            }
+
+            // Extract audio chunks (24kHz mono PCM)
+            val modelTurn = serverContent?.optJSONObject("modelTurn")
+            val parts = modelTurn?.optJSONArray("parts")
+            if (parts != null && parts.length() > 0) {
+                for (i in 0 until parts.length()) {
+                    val part = parts.getJSONObject(i)
+                    val inlineData = part.optJSONObject("inlineData")
+                    val base64Audio = inlineData?.optString("data")
+                    if (!base64Audio.isNullOrEmpty()) {
+                        val pcmBytes = Base64.decode(base64Audio, Base64.DEFAULT)
+                        onAudioChunkReceived(pcmBytes)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun disconnect() {
+        webSocket?.close(1000, "User closed session")
+        webSocket = null
+    }
+}
+
+
+
+--- app/src/main/AndroidManifest.xml ---
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.google.aistudio.mayra">
+
+    <!-- Permissions required for 24/7 background voice assistant -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="Mayra Assistant"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.MayraAssistant">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.MayraAssistant">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.ASSIST" />
+            </intent-filter>
+        </activity>
+
+        <!-- Foreground Service for background audio streaming -->
+        <service
+            android:name=".service.MayraVoiceService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+    </application>
+</manifest>
+
+
+
+--- app/build.gradle.kts ---
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
+}
+
+android {
+    namespace = "com.google.aistudio.mayra"
+    compileSdk = 35
+
+    defaultConfig {
+        applicationId = "com.google.aistudio.mayra"
+        minSdk = 26
+        targetSdk = 35
+        versionCode = 1
+        versionName = "1.0.0"
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+    buildFeatures {
+        compose = true
+    }
+}
+
+dependencies {
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.ui)
+    implementation(libs.androidx.ui.graphics)
+    implementation(libs.androidx.ui.tooling.preview)
+    implementation(libs.androidx.material3)
+    implementation(libs.androidx.material.icons.extended)
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+
+    // OkHttp for WebSocket Gemini Live Audio Streaming
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    
+    // Coroutines
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+}
+
+
